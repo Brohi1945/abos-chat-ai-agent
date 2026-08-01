@@ -58,10 +58,19 @@ What it does NOT do yet (Phase 4.6b, next):
 import json
 import logging
 
+from dotenv import load_dotenv
 from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
 from livekit.plugins import groq, silero
 
 from edge_tts_plugin import EdgeTTS
+
+load_dotenv()  # reads .env in this folder — LIVEKIT_URL/API_KEY/API_SECRET, GROQ_API_KEY.
+# Without this call, python-dotenv being in requirements.txt does nothing by
+# itself; os.environ would stay empty unless you export the vars in your
+# shell some other way. `lk agent deploy` (LiveKit Cloud hosting) sets env
+# vars its own way at deploy time — see abos-chat-ai-agent/README.md — this
+# load_dotenv() call is what makes `python agent.py dev` (local testing)
+# work off a plain .env file.
 
 # --- Azure Speech version (switch back once account verification is
 # sorted — same Asad/Uzma voices, official/more production-stable) ---
