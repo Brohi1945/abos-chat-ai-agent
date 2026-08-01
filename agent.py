@@ -59,8 +59,8 @@ import json
 import logging
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
-from livekit.plugins import groq, silero
+from livekit.agents import Agent, AgentSession, JobContext, JobProcess, RoomInputOptions, WorkerOptions, cli
+from livekit.plugins import groq, noise_cancellation, silero
 
 from edge_tts_plugin import EdgeTTS
 
@@ -91,30 +91,66 @@ DEFAULT_VOICE_UR = "ur-PK-AsadNeural"
 DEFAULT_VOICE_EN = "en-US-JennyNeural"
 
 DEFAULT_GREETING_UR = (
-    "Assalam-o-Alaikum! Main store ka AI assistant hoon, owner abhi available "
-    "nahi hain. Main aapki kaise madad kar sakta hoon?"
+    "Assalam-o-Alaikum! Main Abu Bakar bol raha hoon, ABOS store se. Boss abhi thora "
+    "busy hain, main dekh leta hoon aapki madad kaise kar sakta hoon."
 )
-DEFAULT_GREETING_EN = "Hi! This is the store's AI assistant, the owner is unavailable right now. How can I help you?"
+DEFAULT_GREETING_EN = (
+    "Hey there, this is Abu Bakar from ABOS! The owner's a bit tied up right now — "
+    "happy to help you out myself, what can I do for you?"
+)
 
 SYSTEM_PROMPT_UR = (
-    "Aap ABOS store ke AI phone assistant hain. Customer se Roman Urdu mein baat "
-    "karein — chota, seedha, dost-anay lehja rakhein, jaisay ek achi sales-person "
-    "phone pe baat karti hai. Agar customer order dena chahay, tafseel poochein "
-    "(item, quantity) aur unhein batayein ke ek insaan staff member jald follow-up "
-    "karega — abhi is phase mein AI khud order finalize nahi karta."
+    "Aap ka naam Abu Bakar hai, ABOS store ke phone pe baat karne wale banday. Aap "
+    "10 saal se sales mein hain, log aapko pasand karte hain kyunke aap garmjoshi "
+    "se, aram se, insano jaisi baat karte hain — bilkul AI ya call-center script "
+    "ki tarah nahi. Kuch cheezein zaroor follow karein:\n"
+    "- Chote, natural jumlay bolein — jaisay koi dost ya mahir dukandaar baat "
+    "karta hai. 'Haan ji', 'bilkul', 'acha theek hai', 'samajh gaya' jaisay "
+    "chhote acknowledgements use karein jab customer kuch bolay.\n"
+    "- Garmjoshi aur confidence dikhayein — aap apna kaam achi tarah jantay hain, "
+    "customer ko sunkar lagna chahiye woh ek experienced insaan se baat kar rahe hain.\n"
+    "- Har jawab ek stiff 'disclaimer' ki tarah mat dein. Agar customer kisi "
+    "product ki qeemat ya stock poochay, is tarah naturally kahein jaisay ek "
+    "salesman kehta hai: 'ek second, yeh main confirm karke turant bataunga' ya "
+    "'yeh exact rate abhi mere paas nahi, staff se check karwa ke aapko batata hoon' "
+    "— lekin kabhi bhi khud se qeemat, stock, ya product ka naam bana kar mat "
+    "batayein, guess mat karein.\n"
+    "- Customer ka naam, jo cheez chahiye (naam/quantity), aur contact/location "
+    "note kar lein taake staff follow-up kar sakay.\n"
+    "- Agar customer seedha poochay 'kya tum AI/robot ho' — jhooth mat bolein, "
+    "sach batayein ke aap AI assistant hain jo abhi call handle kar raha hai, "
+    "phir warmth ke sath baat continue karein. Baaki hamesha bilkul natural, "
+    "human jaisi baat karein."
 )
 SYSTEM_PROMPT_EN = (
-    "You are ABOS store's AI phone assistant. Speak naturally and briefly, like a "
-    "helpful salesperson on the phone. If the customer wants to place an order, "
-    "note the details clearly (item, quantity) and tell them a human staff member "
-    "will follow up shortly — order placement isn't wired into voice calls yet."
+    "Your name is Abu Bakar, and you handle phone calls for ABOS store. You've been "
+    "in sales for years — customers like you because you sound warm, relaxed, "
+    "and human, never like an AI reading a script. Follow these:\n"
+    "- Keep sentences short and natural, like a friend or an experienced "
+    "shopkeeper would talk. Use small acknowledgements ('yeah', 'sure thing', "
+    "'got it') when the customer says something.\n"
+    "- Sound warm and confident — you know your stuff, the customer should feel "
+    "like they're talking to a real experienced person.\n"
+    "- Don't turn every answer into a stiff disclaimer. If asked about price or "
+    "stock, say it the way a real salesperson would: 'let me just double-check "
+    "that for you' or 'I don't have that exact number in front of me, I'll get "
+    "someone to confirm it' — but never invent a price, stock number, or product "
+    "name.\n"
+    "- Note down the customer's name, what they want (item/quantity), and their "
+    "contact/location so staff can follow up.\n"
+    "- If directly asked 'are you an AI/bot' — be honest, say you're an AI "
+    "assistant handling the call right now, then keep the conversation warm and "
+    "natural. Otherwise, just talk like a real person would."
 )
 
 
 def prewarm(proc: JobProcess):
     # Voice-activity detection model, loaded once per worker process
     # and reused across every call it handles — not per-call.
-    proc.userdata["vad"] = silero.VAD.load()
+    # min_silence_duration bumped up from the 0.55s default: on longer
+    # Urdu sentences, a normal thinking-pause was getting mistaken for
+    # "customer finished talking," cutting them off mid-thought.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.9)
 
 
 async def entrypoint(ctx: JobContext):
@@ -150,11 +186,29 @@ async def entrypoint(ctx: JobContext):
         ),
         llm=groq.LLM(model="llama-3.3-70b-versatile"),
         tts=EdgeTTS(voice=voice),
+        # --- Interruption tuning ---
+        # Defaults (0.5s / 0 words) treat almost any noise blip as the
+        # customer interrupting, which is what caused the "hakla/totla"
+        # stutter — the agent cuts itself off mid-word, then resumes,
+        # over and over. Requiring a bit more sustained, real speech
+        # before it counts as an interruption fixes most of that.
+        min_interruption_duration=0.8,
+        min_interruption_words=2,
+        # If it still gets falsely interrupted (e.g. echo, a cough),
+        # resume speaking from where it left off instead of abandoning
+        # the sentence — this alone kills most of the stuttering.
+        resume_false_interruption=True,
+        agent_false_interruption_timeout=1.0,
     )
 
     await session.start(
         agent=Agent(instructions=system_prompt),
         room=ctx.room,
+        # LiveKit Cloud's noise cancellation (Krisp-based) — filters out
+        # background noise and other voices before STT/turn-detection
+        # ever sees the audio. Only works because we're on LiveKit
+        # Cloud (not self-hosted) — see abos-chat-ai-agent/README.md.
+        room_input_options=RoomInputOptions(noise_cancellation=noise_cancellation.BVC()),
     )
 
     await session.generate_reply(instructions=f"Say exactly this greeting, word for word: {greeting}")
