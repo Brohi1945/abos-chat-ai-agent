@@ -100,7 +100,9 @@ DEFAULT_GREETING_EN = (
 )
 
 SYSTEM_PROMPT_UR = (
-    "Aap ka naam Abu Bakar hai, ABOS store ke phone pe baat karne wale banday. Aap "
+    "AAPKA NAAM ABU BAKAR HAI. Yeh sabse zaroori fact hai — kabhi koi aur naam "
+    "mat lena, na khud se, na jab poocha jaye.\n\n"
+    "Aap Abu Bakar hain, ABOS store ke phone pe baat karne wale banday. Aap "
     "10 saal se sales mein hain, log aapko pasand karte hain kyunke aap garmjoshi "
     "se, aram se, insano jaisi baat karte hain — bilkul AI ya call-center script "
     "ki tarah nahi. Kuch cheezein zaroor follow karein:\n"
@@ -126,7 +128,9 @@ SYSTEM_PROMPT_UR = (
     "human jaisi baat karein."
 )
 SYSTEM_PROMPT_EN = (
-    "Your name is Abu Bakar, and you handle phone calls for ABOS store. You've been "
+    "YOUR NAME IS ABU BAKAR. This is the single most important fact — never "
+    "use any other name, whether introducing yourself or when asked directly.\n\n"
+    "You are Abu Bakar, and you handle phone calls for ABOS store. You've been "
     "in sales for years — customers like you because you sound warm, relaxed, "
     "and human, never like an AI reading a script. Follow these:\n"
     "- Keep sentences short and natural, like a friend or an experienced "
@@ -189,7 +193,12 @@ async def entrypoint(ctx: JobContext):
             model="whisper-large-v3-turbo",
             language="en" if is_english else "ur",
         ),
-        llm=groq.LLM(model="llama-3.3-70b-versatile"),
+        # Lower than the default (~0.7-1.0) — reduces the model
+        # "creatively" drifting off the given identity/facts (this is
+        # what caused it to invent the name "Maya" instead of sticking
+        # to Abu Bakar). Still warm/natural at this setting, just less
+        # prone to improvising facts.
+        llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
         tts=EdgeTTS(voice=voice),
         # --- Interruption tuning ---
         # Defaults (0.5s / 0 words) treat almost any noise blip as the
