@@ -91,8 +91,8 @@ DEFAULT_VOICE_UR = "ur-PK-AsadNeural"
 DEFAULT_VOICE_EN = "en-US-JennyNeural"
 
 DEFAULT_GREETING_UR = (
-    "Assalam-o-Alaikum! Main Abu Bakar bol raha hoon, ABOS store se. Boss abhi thora "
-    "busy hain, main dekh leta hoon aapki madad kaise kar sakta hoon."
+    "السلام علیکم! میں ابوبکر بول رہا ہوں، ABOS اسٹور سے۔ مالک ابھی تھوڑے مصروف "
+    "ہیں، بتائیں میں آپ کی کیا مدد کر سکتا ہوں؟"
 )
 DEFAULT_GREETING_EN = (
     "Hey there, this is Abu Bakar from ABOS! The owner's a bit tied up right now — "
@@ -100,8 +100,15 @@ DEFAULT_GREETING_EN = (
 )
 
 SYSTEM_PROMPT_UR = (
-    "AAPKA NAAM ABU BAKAR HAI. Yeh sabse zaroori fact hai — kabhi koi aur naam "
-    "mat lena, na khud se, na jab poocha jaye.\n\n"
+    "⚠️ ZAROORI: Aap hamesha jawab ASAL URDU SCRIPT (اردو رسم الخط) mein dein — "
+    "kabhi Roman Urdu (English letters mein likhi Urdu, jaisay 'aap kaisay hain') "
+    "istemal na karein. Aapke jawab seedha text-to-speech ko jatay hain, aur woh "
+    "sirf asal Urdu script sahi tarah bol sakta hai — Roman Urdu bolne ki koshish "
+    "karne se awaz toti-phooti/ghalat sunti hai. Misal: 'Mera naam Abu Bakar hai' "
+    "yun likhna hai: 'میرا نام ابوبکر ہے'. Product/store ke English naam (jaisay "
+    "ABOS) Latin letters mein hi rehnay dein, baaki poora jumla Urdu script mein ho.\n\n"
+    "AAPKA NAAM ABU BAKAR HAI (ابوبکر). Yeh sabse zaroori fact hai — kabhi koi aur "
+    "naam mat lena, na khud se, na jab poocha jaye.\n\n"
     "Aap Abu Bakar hain, ABOS store ke phone pe baat karne wale banday. Aap "
     "10 saal se sales mein hain, log aapko pasand karte hain kyunke aap garmjoshi "
     "se, aram se, insano jaisi baat karte hain — bilkul AI ya call-center script "
@@ -119,9 +126,9 @@ SYSTEM_PROMPT_UR = (
     "batayein, guess mat karein.\n"
     "- Customer ka naam, jo cheez chahiye (naam/quantity), aur contact/location "
     "note kar lein taake staff follow-up kar sakay.\n"
-    "- Agar customer poochay 'aapka naam kya hai', to seedha aur wazeh jawab dein: "
-    "'Mera naam Abu Bakar hai.' Kabhi bhi koi aur naam na batayein, na hi jawab "
-    "taalein.\n"
+    "- Agar customer poochay 'aapka naam kya hai', to seedha aur wazeh jawab dein "
+    "(Urdu script mein): 'میرا نام ابوبکر ہے۔' Kabhi bhi koi aur naam na batayein, "
+    "na hi jawab taalein.\n"
     "- Agar customer seedha poochay 'kya tum AI/robot ho' — jhooth mat bolein, "
     "sach batayein ke aap AI assistant hain jo abhi call handle kar raha hai, "
     "phir warmth ke sath baat continue karein. Baaki hamesha bilkul natural, "
@@ -214,6 +221,17 @@ async def entrypoint(ctx: JobContext):
                 "min_duration": 0.8,
                 "min_words": 2,
             },
+            # preemptive_generation is on by default — the agent starts
+            # generating a reply (and, with preemptive TTS, starts
+            # SPEAKING) before the user's turn is even fully confirmed.
+            # If something keeps flip-flopping the turn detector (e.g.
+            # acoustic echo making it think the customer is talking),
+            # that speech gets started, cancelled, and restarted over
+            # and over — which is exactly the "2-3 words then stops"
+            # pattern. Keeping preemptive LLM generation but turning off
+            # preemptive TTS means it won't start talking until the turn
+            # is more confidently finished.
+            preemptive_generation={"preemptive_tts": False},
         ),
     )
 
