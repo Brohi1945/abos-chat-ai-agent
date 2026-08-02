@@ -59,7 +59,7 @@ import json
 import logging
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, JobProcess, RoomInputOptions, WorkerOptions, cli
+from livekit.agents import Agent, AgentSession, JobContext, JobProcess, TurnHandlingOptions, WorkerOptions, cli, room_io
 from livekit.plugins import groq, noise_cancellation, silero
 
 from edge_tts_plugin import EdgeTTS
@@ -200,19 +200,21 @@ async def entrypoint(ctx: JobContext):
         # prone to improvising facts.
         llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
         tts=EdgeTTS(voice=voice),
-        # --- Interruption tuning ---
-        # Defaults (0.5s / 0 words) treat almost any noise blip as the
-        # customer interrupting, which is what caused the "hakla/totla"
-        # stutter — the agent cuts itself off mid-word, then resumes,
-        # over and over. Requiring a bit more sustained, real speech
-        # before it counts as an interruption fixes most of that.
-        min_interruption_duration=0.8,
-        min_interruption_words=2,
-        # If it still gets falsely interrupted (e.g. echo, a cough),
-        # resume speaking from where it left off instead of abandoning
-        # the sentence — this alone kills most of the stuttering.
-        resume_false_interruption=True,
-        agent_false_interruption_timeout=1.0,
+        # --- Interruption tuning (current API — the old min_interruption_*
+        # / resume_false_interruption kwargs on AgentSession are
+        # deprecated as of the version installed here; they still get
+        # accepted but with a warning, and their behavior is no longer
+        # guaranteed, so we use the replacement TurnHandlingOptions
+        # object explicitly instead of relying on the deprecated shim) ---
+        turn_handling=TurnHandlingOptions(
+            interruption={
+                # "adaptive" lets LiveKit factor in confidence/false-
+                # interruption recovery itself, rather than a hard cutoff.
+                "mode": "adaptive",
+                "min_duration": 0.8,
+                "min_words": 2,
+            },
+        ),
     )
 
     await session.start(
@@ -222,7 +224,9 @@ async def entrypoint(ctx: JobContext):
         # background noise and other voices before STT/turn-detection
         # ever sees the audio. Only works because we're on LiveKit
         # Cloud (not self-hosted) — see abos-chat-ai-agent/README.md.
-        room_input_options=RoomInputOptions(noise_cancellation=noise_cancellation.BVC()),
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(noise_cancellation=noise_cancellation.BVC()),
+        ),
     )
 
     await session.generate_reply(instructions=f"Say exactly this greeting, word for word: {greeting}")
